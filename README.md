@@ -19,14 +19,18 @@ This library is just provided as-is, any pull requests are welcome. :smile:
 ![fixme](fixme.png)
 
 TkGUI's `Codegen` object is currently designed to generate code with post-order tree walk,
-and it supposes all values are created with a construct expression that won't act like `Toplevel(root)` (it will create a new window beside returining value)
+and it supposes all values are created with a construct expression that won't act like `Toplevel(root)` (it will create a new window besides returining a value)
 
-And when `TkWin` is used, `Codegen` will produce output with both `TkWin`(which will call `Toplevel` once) and `Toplevel(root)` called, and that will results blank windows
+And when `TkWin` is used, `Codegen` will produce output with both `TkWin`(which will call `Toplevel` once) and `Toplevel(root)` called, and that will results blank windows (too bad! even more annoying than crash direcly)
 
 Currently, I have no idea about this, `Codegen` uses value-name substraction method
 (it has fields `_constNames`+`_names`+`_exprs`+`_autoNamed`, methods `_allocName`, `named(name,obj)->T`, `newName(name,obj)->str`, `nv(obj)`"name a value", `_nvUnwrap`, `_addResult(res,expr_code)` )
 
 But, if you don't use this feature(`getCode(run=False)` / `runCode(code)`), TkGUI works just fine.
+
+## Other bad things about codegen
+
++ `_.var` created in `__init__` cannot have its initializer inclueded in result, so maybe I should add codegen listener runs when not `isEnabled`?
 
 ## Running Example with Codegen
 
@@ -151,6 +155,8 @@ lv.childs = [btn, t, btn1, lh, ent, separator, scrolld, t4, ckbox, lh1, lh2, scr
 tkgui.treeUI = lv
 ```
 
+It's really long... But actually, only minimal code is generated. (I can't imagine how long will it takes writing this by hand)
+
 ## Details About Codegen
 
 view at [tkgui_utils.py](tkgui/tkgui_utils.py#L87)
@@ -205,3 +211,5 @@ view at [tkgui_utils.py](tkgui/tkgui_utils.py#L87)
     if is_extern: self._constNames[x] = name
     return x
 ```
+
+Anybody can help? :sob:
