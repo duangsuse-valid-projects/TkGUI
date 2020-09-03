@@ -14,7 +14,7 @@ from tkgui.tkgui import TkGUI, TkWin, MenuItem, TreeWidget, nop, Timeout, callTh
 
 
 app = ArgumentParser(prog="hachi-groups", description="GUI tool for recording lyric sentences with hachi")
-app.add_argument("music", type=FileType("r"), help="music BGM to play")
+app.add_argument("music", type=FileType("r"), nargs="*", help="music BGM to play")
 app.add_argument("-seek-minus", type=float, default=3.0, help="back-seek before playing the sentence")
 app.add_argument("-mix-multi", action="store_true", default=False, help="give multi-track mix")
 app.add_argument("-o", type=str, default="mix.mid", help="mixed output file")
@@ -25,18 +25,21 @@ app.add_argument("-import", type=str, default=None, help="import a sentence list
 rescueWidgetOption["relief"] = lambda _: None
 
 class GUI(TkGUI):
+  def __init__(self):
+    super().__init__()
+    _ = self.underscore
+    self.a=_.var(str, "some"); self.b=_.var(bool); self.c=_.var(int)
+    c.getAttr(self, "a"); c.getAttr(self, "b"); c.getAttr(self, "c")
   def up(self):
     self.a.set("wtf")
     self.ui.removeChild(self.ui.lastChild)
-    GUI.ThreadDemo().run("Thread Demo")
+    a=GUI.ThreadDemo()
+    a.run("Thread Demo", compile_binding={"GUI_ThreadDemo":a})
   def pr(self):
     print(self.c.get())
     self.ui.removeChild(self.ui.childs[5])
   def layout(self):
     _ = self.underscore
-    c.setAttr(self, "a", _.var(str, "some"))
-    c.setAttr(self, "b", _.var(bool))
-    c.setAttr(self, "c", _.var(int))
     def addChild(): self.ui.appendChild(_.text("hhh"))
     return _.verticalLayout(
       _.button("Yes", self.quit),
@@ -52,7 +55,7 @@ class GUI(TkGUI):
       _.horizontalLayout(
         _.by("sbar", _.scrollBar(_.vert)),
         _.verticalLayout(
-          _.by("lbox", _.listBox(("1 2 3  apple juicy lamb clamp banana  "*20).split("  "))),
+          _.by("lbox", _.listBox(("1 2 3  apple juicy lamb clamp banana  "*20).split("  "), _.chooseMulti)),
           _.by("hsbar", _.scrollBar(_.hor))
         )
       ),
@@ -65,8 +68,8 @@ class GUI(TkGUI):
       _.menuButton("kind", _.menu(MenuItem.CheckBox("wtf", self.b), MenuItem.RadioButton("emm", self.c, 9)), relief=_.raised),
       _.labeledBox("emmm", _.button("Dangerous", self.run3))
     )
-  def run1(self): GUI.Layout1().run("Hello")
-  def run2(self): a=GUI.SplitWin(); a.runCode(a.getCode()) #.run("Split")
+  def run1(self): GUI.Layout1().run("Hello", compile_binding={"GUI":GUI})
+  def run2(self): GUI.SplitWin().run("Split", compile_binding={})
   def run3(self): print(self.ta.marker["insert"])
   def setup(self):
     _ = self.underscore
@@ -86,19 +89,22 @@ class GUI(TkGUI):
 
   class Layout1(TkWin):
     def layout(self):
+      menubar = self.menu(self.tk,
+        MenuItem.named("New", nop),
+        MenuItem.named("Open", GUI.Layout1.run1),
+        MenuItem.SubMenu("Help", [MenuItem.named("Index...", nop), MenuItem.sep, MenuItem.named("About", nop)])
+      ) # probably bug: menu (label='Open', command=GUI.Layout1.run1) works no matter command is correct or not
+        # possible: win.tk uses attribute assign(when getCode() ) bound to created menu and it's reused
+      self.setMenu(menubar)
+      self.setSizeBounds((200,100))
       _ = self.underscore
       return _.verticalLayout(
         _.text("Hello world"),
         _.by("can", _.canvas((250, 300)))
       )
+    @staticmethod
+    def run1(): GUI.DoNothing().run("x", compile_binding={})
     def setup(self):
-      menubar = self.menu(self.tk,
-        MenuItem.named("New", nop),
-        MenuItem.named("Open", lambda: GUI.DoNothing().run("x")),
-        MenuItem.SubMenu("Help", [MenuItem.named("Index...", nop), MenuItem.sep, MenuItem.named("About", nop)])
-      )
-      self.setMenu(menubar)
-      self.setSizeBounds((200,100))
       self.addSizeGrip()
       self.can["bg"] = "blue"
       coord = (10, 50, 240, 210)
@@ -203,8 +209,7 @@ from tkgui.tkgui_utils import Codegen
 def main(args = argv[1:]):
   cfg = app.parse_args(args)
   gui = GUI()
-  #gui.run("Application")
   Codegen.useDebug = True
-  gui.runCode(gui.getCode(False), GUI=gui, TkGUI=gui)
+  gui.run("Widget Factory", compile_binding={"GUI":gui, "TkGUI":gui})
 
 if __name__ == "__main__": main()

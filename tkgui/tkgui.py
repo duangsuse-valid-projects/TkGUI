@@ -1,5 +1,5 @@
 from tkinter import Frame, PanedWindow, LEFT, TOP, RIGHT, BOTTOM, Label, Button, Entry, Text, INSERT, END, DISABLED
-from tkinter import Radiobutton, Checkbutton, Listbox, SINGLE, MULTIPLE, BROWSE, Scrollbar, Scale, Spinbox
+from tkinter import Radiobutton, Checkbutton, Listbox, SINGLE, MULTIPLE, BROWSE, EXTENDED, Scrollbar, Scale, Spinbox
 from tkinter import LabelFrame, Menu, Menubutton, Canvas, PhotoImage
 from tkinter import Tk, Toplevel, X, Y, BOTH, FLAT, RAISED, HORIZONTAL, VERTICAL
 from tkinter import StringVar, BooleanVar, IntVar, DoubleVar
@@ -229,6 +229,7 @@ class BaseTkGUI:
     self.style:Style = Style(self.tk)
   def layout(self) -> "Widget":
     '''
+    you can also put static layout configuration (e.g. title/icon/size/sizeBounds) and they are inclueded in codegen.
     (FAILED since Python has NO overriding) I'm sorry about adding so many kwargs, but Python is not real OOP (just obj.op_getter property-based),
     there's no name can be implicitly(w/o "self") solved in scope -- inner class, classmethod, staticmethod, property, normal defs
     so only global/param/local can be used without boilerplates, I've choosen keyword args.
@@ -237,8 +238,9 @@ class BaseTkGUI:
   def setup(self): pass
 
   def var(self, type, initial=None, var_map = {str: StringVar, bool: BooleanVar, int: IntVar, float: DoubleVar}):
-    variable = c.named("var", c.callNew(var_map[type], self.tk))
-    if initial != None: c.invoke(variable, "set", initial)
+    with c.regResult():
+      variable = c.named("var", c.callNew(var_map[type], self.tk))
+      if initial != None: c.invoke(variable, "set", initial)
     return variable # may in ctor, no codegen autoname
   def by(self, attr, e_ctor):
     def createAssign(p):
@@ -248,28 +250,32 @@ class BaseTkGUI:
   @property
   def underscore(self) -> "BaseTkGUI": return self
 
-  def run(self, title="App"):
+  def run(self, title="App", compile_binding=None):
     self.tk.wm_deiconify()
     self.tk.wm_title(title)
+    if compile_binding != None:
+      self.runCode(self.getCode(), **compile_binding)
+      return
     self.ui = mayGive1(self.tk, self.layout())
     self.ui.pack()
     self.setup()
     self.focus(); self.tk.mainloop()
   def getCode(self, run=False) -> str:
     '''gets code for layout&widgets, note codes in __init__ (e.g. var) is ignored (replace with _.by(attr,it) in layout)'''
-    Codegen.isEnabled = True
+    c.isEnabled = True
     if run: self.run("Codegen Running")
     ui = self.ui or mayGive1(self.tk, self.layout())
     # give missing epilog assign
     c.setAttr(self, "treeUI", ui)
     code = c.getCode()
-    Codegen.isEnabled = False
+    c.isEnabled = False
     c.clear()
     return code
+  def _compile(self, code): return compile(code, "<runCode-%s>" %type(self).__qualname__, "exec")
   def runCode(self, code, **extra_names):
-    '''run generated code, then show result self.treeUI'''
-    codeRef = compile(code, "<runCode>", "exec")
-    exec(codeRef, globals(), {"tkgui": TkGUI.root, "root": TkGUI.root.tk, **extra_names})
+    '''run generated code or type:code, then show result self.treeUI'''
+    codeRef = self._compile(code) if isinstance(code, str) else code
+    exec(codeRef, globals(), {"tkgui": TkGUI.root, "root": TkGUI.root.tk, "win": self, **extra_names})
     self.treeUI.pack()
     self.ui = self.ui or self.treeUI #:dytype
     self.setup()
@@ -278,12 +284,13 @@ class BaseTkGUI:
   def title(self) -> str: return self.tk.wm_title()
   @title.setter
   def title(self, v): c.invoke(self.tk, "wm_title", v)
-  @staticmethod
-  def _interpSize(code): return tuple(int(d) for d in code[0:code.index("+")].split("x"))
+  def setIcon(self, path:str):
+    try: c.invoke(self.tk, "wm_iconphoto", c.callNew(PhotoImage, file=path) ) #cg:note
+    except TclError: self.tk.wm_iconbitmap(path)
   @property
   def size(self) -> tuple:
     code = self.tk.wm_geometry()
-    return c.call(TkGUI._interpSize, code)
+    return tuple(int(d) for d in code[0:code.index("+")].split("x"))
   def setSize(self, dim, xy=None):
     '''sets the actual size/position of window'''
     code = "x".join(str(i) for i in dim)
@@ -293,9 +300,6 @@ class BaseTkGUI:
     '''set [min] to (1,1) if no limit'''
     c.invoke(self.tk, "wm_minsize", min[0], min[1])
     if max: c.invoke(self.tk, "wm_maxsize", max[0], max[1])
-  def setIcon(self, path:str):
-    try: c.invoke(self.tk, "wm_iconphoto", c.callNew(PhotoImage, file=path) ) #cg:note
-    except TclError: self.tk.wm_iconbitmap(path)
   def setWindowAttributes(self, attrs): self.tk.wm_attributes(*attrs)
   @property
   def screenSize(self):
@@ -459,7 +463,7 @@ class BaseTkGUI:
   @staticmethod
   @widget
   def radioButton(p, text, dst, value, on_click=nop):
-    return c.callNew(Radiobutton, p, text=text, variable=dst, value=value, command=on_click)
+    return c.named("rbtn", c.callNew(Radiobutton, p, text=text, variable=dst, value=value, command=on_click))
   @staticmethod
   @widget
   def menuButton(p, text, menu_ctor, **kwargs):
@@ -494,7 +498,7 @@ class BaseTkGUI:
   @staticmethod
   @widget
   def listBox(p, items, mode=SINGLE, **kwargs):
-    mode1 = BROWSE if mode == SINGLE else mode
+    mode1 = BROWSE if mode == SINGLE else EXTENDED
     lbox = c.named("lbox", c.callNew(Listbox, p, selectmode=mode1, **kwargs))
     for (i, it) in enumerate(items): c.invoke(lbox, "insert", i, it)
     return lbox
@@ -526,21 +530,20 @@ class BaseTkGUI:
   @staticmethod
   @widget
   def treeWidget(p, mode=SINGLE):
-    mode1 = BROWSE if mode == SINGLE else mode
+    mode1 = BROWSE if mode == SINGLE else EXTENDED
     treev = c.callNew(TreeWidget, p, selectmode=mode1)
     return treev
 
   @staticmethod
   @widget
   def labeledBox(p, text, *items, **kwargs):
-    box = c.callNew(LabelFrame, p, text=text, **kwargs)
-    lbox = c.callNew(TkGUI.PackSideFill, box, None, BOTH)
-    for it in items: c.invoke(mayGive1(lbox.e, it), "pack")
-    return c.named("lbox", lbox)
+    box = c.named("labox", c.callNew(LabelFrame, p, text=text, **kwargs))
+    for it in items: c.invoke(mayGive1(box, it), "pack")
+    return box
   @staticmethod
   @widget
   def splitter(p, orient, *items, weights=None, **kwargs): #TODO
-    paned_win = c.callNew(PanedWindow, p, orient=orient, **kwargs)
+    paned_win = c.named("spl", c.callNew(PanedWindow, p, orient=orient, **kwargs))
     for it in items: c.invoke(paned_win, "add", mayGive1(paned_win, it))
     return paned_win
   @staticmethod
@@ -571,8 +574,8 @@ class BaseTkGUI:
   both = BOTH
   left,top,right,bottom = LEFT,TOP,RIGHT,BOTTOM
   raised,flat=RAISED,FLAT
-  at_cursor,at_end=INSERT,END
-  choose_single,choose_multi = SINGLE,MULTIPLE
+  atCursor,atEnd=INSERT,END
+  chooseSingle,chooseMulti = SINGLE,MULTIPLE
   class Anchors:
     LT="NW"; TOP="N"; RT="NE"
     L="W"; CENTER="CENTER"; R="E"
@@ -636,7 +639,6 @@ class BaseTkGUI:
 class TkGUI(BaseTkGUI, EventPoller):
   root:"TkGUI" = None
   def __init__(self):
-    if TkGUI.root != None: raise RuntimeError("TkGUI is singleton, should not created twice")
     super().__init__(Tk())
     EventPoller.__init__(self)
     self.on_quit = EventCallback()
@@ -650,6 +652,8 @@ class TkGUI(BaseTkGUI, EventPoller):
 class TkWin(BaseTkGUI):
   def __init__(self):
     super().__init__(Toplevel(TkGUI.root.tk))
+    c.named("win", self, is_extern=True)
+    c.getAttr(self, "tk")
 
 def callThreadSafe(op, args=(), kwargs={}):
   return TkGUI.root.callThreadSafe(op, args, kwargs)

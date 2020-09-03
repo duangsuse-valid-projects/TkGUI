@@ -4,7 +4,7 @@
 from setuptools import setup, find_packages
 
 setup(
-  name="tkgui", version="0.1.0",
+  name="tkgui", version="0.1.1",
   python_requires=">=3.5",
   author="duangsuse", author_email="fedora-opensuse@outlook.com",
   url="https://github.com/duangsuse-valid-projects/Hachiko",

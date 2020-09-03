@@ -54,26 +54,30 @@ class SyntaxFmt:
     for (name, v) in kwargs.items(): sb.append("%s=%s" %(name, v) )
     return ", ".join(sb)
   @staticmethod
-  def guiAutoExpr(x):
-    from .tkgui import TkWin # never import previor than tkgui imports us
-    def noargNew(t): return fmt.callNew(t, ([],{}))
-    if isinstance(x, Toplevel): return noargNew(Toplevel)
-    elif isinstance(x, TkWin): return noargNew(TkWin) # fallback workaround, behaves VERY ugly (spawn useless wins)
-    return None
+  def pyOpRef(op):
+    def hasSelf():
+      try: id(op.__self__); return True
+      except AttributeError: return False
+    def joinLast(rsep, sep, xs):
+      part = sep.join(xs[:-1])
+      return xs[0] if len(xs) < 2 else part+rsep+xs[-1]
+    valid = op.__qualname__.replace(".", "").isidentifier()
+    return joinLast(".", "_" if hasSelf() else ".", op.__qualname__.split(".")) if valid else None #e.g. lambda, check not serious
   argList = pyArg
   value = repr
   list = lambda xs: "[%s]" %", ".join(xs)
   assign = lambda name, x: "%s = %s" %(name, x)
-  nameRef = lambda name: name   #v add checks for __self__ ?
-  opRef = lambda op: op.__qualname__ if op.__qualname__.replace(".", "").isidentifier() else None #e.g. lambda, check not serious
-  call = lambda name, params: "%s(%s)" %(name, SyntaxFmt.argList(params))
+  nameRef = lambda name: name
+  opRef = lambda op: SyntaxFmt.pyOpRef(op)
+  call = lambda op, params: "%s(%s)" %(op.__qualname__, SyntaxFmt.argList(params))
   callNew = lambda ty, params: "%s(%s)" %(ty.__qualname__, SyntaxFmt.argList(params))
-  invoke = lambda x, op_name, params: "%s.%s(%s)" %(x, op_name, SyntaxFmt.argList(params))
+  invoke = lambda x, op, params: "%s.%s(%s)" %(x, op.__name__, SyntaxFmt.argList(params))
   setAttr = lambda x, name, v: "%s.%s = %s" %(x, name, v)
   setItem = lambda x, key, v: "%s[%s] = %s" %(x, SyntaxFmt.value(key), v)
+  getAttr = lambda x, name: "%s.%s" %(x, name)
   tfNil = ("True", "False", "None")
   lineSep = "\n"
-  autoExpr = lambda x: SyntaxFmt.guiAutoExpr(x)
+  autoExpr = lambda x: None
   specialCaller = "createWidget"
   defaultNameMap = {}
 fmt = SyntaxFmt
@@ -90,31 +94,41 @@ class Codegen:
     The code generator generally uses value-name substitution,
     to provide generated-file-wise argument, use [named] method.
     NOTE: non-flat syntax structures are NOT supported, the result is mainly post-order tree walk'''
-  isEnabled = False
   useDebug = False
   def __init__(self):
     super().__init__()
+    self.isEnabled = False; self._isAlwaysRegResult = False
     self._sb = []
     self._names = id_dict(); self._exprs = id_dict()
     self._autoNamed = id_set()
-    self._constNames = Codegen._initConstNames()
+    self._externNames = Codegen._initConstNames()
+    self._recvRefs = id_dict()
   @staticmethod
   def _initConstNames():
     (t,f,nil) = fmt.tfNil
     return id_dict({True: t, False:f, None: nil})
-  def clear(self):
-    self._sb = []
+  def clear(self, keep_state=False):
+    self._sb.clear()
+    if keep_state: return
     self._names.clear(); self._exprs.clear()
     self._autoNamed.clear()
-    self._constNames = Codegen._initConstNames()
+    self._externNames = Codegen._initConstNames()
+    self._recvRefs.clear() #invoke&assign
+  def _write(self, text): self._sb.append(text)
   def write(self, get_text):
-    if not Codegen.isEnabled: return
+    if not self.isEnabled: return
     text = get_text()
-    if Codegen.isEnabled: self._sb.append(text)
+    self._write(text)
   def getCode(self):
     code = fmt.lineSep.join(self._sb)
-    if Codegen.useDebug: print(code)
+    if Codegen.useDebug: print("\tCodeDump:"); print(code)
     return code
+  def regResult(self): return Codegen.AlwaysRegResult(self)
+  class AlwaysRegResult:
+    def __init__(self, outter):
+      self._outter = outter
+    def __enter__(self): self._outter._isAlwaysRegResult = True
+    def __exit__(self, *args): self._outter._isAlwaysRegResult = False
 
   @staticmethod
   def nextName(name:str):
@@ -132,8 +146,8 @@ class Codegen:
     '''this may give an value a name, if [x] is provided before, then [nextName] is used. see [nv]'''
     self._names[x] = self._allocName(name)
     if is_extern:
-      assert name not in self._constNames, "extern duplicate: %s" %name
-      self._constNames[x] = name
+      assert name not in self._externNames, "extern duplicate: %s" %name
+      self._externNames[x] = name
     return x
   def newName(self, name, x):
     '''give [x] a new name'''
@@ -147,7 +161,7 @@ class Codegen:
     '''name a expression result, note [named] could not be used twice on the same value,
       or inconsistence nameRef (e.g. created@callNew foo, re-named to xxx later) will be wrote'''
     def nameRef():
-      kst = self._constNames.get(x)
+      kst = self._externNames.get(x)
       if kst != None: return kst
       nam = self._names.get(x)
       if nam != None: nam = fmt.nameRef(nam)
@@ -160,15 +174,22 @@ class Codegen:
       name = self._names.get(x)
       if name == None and (x in self._autoNamed):
         name = self.newName("%s_1" %type(x).__name__.lower(), x)
-      if name != None: self.write(lambda: fmt.assign(name, expr) )
+      if name != None and x not in self._externNames:
+        code = fmt.assign(name, expr)
+        self._write(code)
+        self._recvRefs.getOrPut(x, list).append(code)
       self._exprs[x] = "+"
     return nameRef()
   def _regResult(self, res, get_code):
-    if not Codegen.isEnabled: return
-    if res == None: self.write(get_code); return # python's default func result
-    code = get_code()
-    self._exprs[res] = code
-    self._autoNamed.add(res)
+    shouldDo = self._isAlwaysRegResult
+    if shouldDo: shouldDo = self.isEnabled; self.isEnabled = True #shorten.
+    if self.isEnabled:
+      if res != None: # python's default func result
+        code = get_code()
+        self._exprs[res] = code
+        self._autoNamed.add(res)
+      else: self.write(get_code)
+    if self._isAlwaysRegResult: self.isEnabled = shouldDo
   def _name(self, args, kwargs):
     '''name those actual param values'''
     namArgs = [self.nv(arg) for arg in args]
@@ -196,8 +217,13 @@ class Codegen:
       if deftName != None: self.named(deftName, insta) # scope[value] may rewrote to new name
     return insta
   def invoke(self, x, op_name, *args, **kwargs):
-    res = x.__getattribute__(op_name)(*args, **kwargs)
-    self._regResult(res, lambda: fmt.invoke(self.nv(x), op_name, self._name(args, kwargs)))
+    opBound = x.__getattribute__(op_name)
+    res = opBound(*args, **kwargs)
+    def regCode():
+      code = fmt.invoke(self.nv(x), opBound, self._name(args, kwargs))
+      self._recvRefs.getOrPut(x, list).append(code)
+      return code
+    self._regResult(res, regCode)
     return res
   def setAttr(self, x, name, v):
     x.__setattr__(name, v)
@@ -205,6 +231,13 @@ class Codegen:
   def setItem(self, x, key, v):
     x[key] = v
     self.write(lambda: fmt.setItem(self.nv(x), key, self.nv(v)) )
+  def getAttr(self, x, name):
+    '''return value of x.name, also denotes it is already initialized so don't generate assignment again'''
+    attr = x.__getattribute__(name)
+    self.named(fmt.getAttr(self.nv(x), name), attr, is_extern=True)
+    refs = self._recvRefs.get(attr)
+    if refs != None:
+      for ref in refs: self._sb.remove(ref)
 
 
 class EventCallback:
@@ -330,6 +363,7 @@ class EventPoller:
 class id_dict(dict):
   '''try to store objects, use its identity to force store unhashable types'''
   def get(self, key): return super().get(id(key))
+  def getOrPut(self, key, get_value): return super().setdefault(id(key), get_value())
   def __getitem__(self, key): return super().__getitem__(id(key))
   def __setitem__(self, key, value): return super().__setitem__(id(key), value)
   def __delitem__(self, key): return super().__delitem__(id(key))

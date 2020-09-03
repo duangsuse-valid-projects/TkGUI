@@ -16,6 +16,8 @@ This library is just provided as-is, any pull requests are welcome. :smile:
 
 ## Codegen ordering bug
 
+> This issue was fixed in `0.1.1`
+
 ![fixme](fixme.png)
 
 TkGUI's `Codegen` object is currently designed to generate code with post-order tree walk,
