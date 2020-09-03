@@ -6,12 +6,13 @@ from tkinter import Menu
 import threading, time, requests
 import os
 
-from tkgui.tkgui_utils import startFile, Backend
-from tkgui.tkgui_utils import guiCodegen as c
+from tkgui.utils import startFile, Backend
+from tkgui.utils import guiCodegen as c
 Backend.TTk.use()
 
-from tkgui.tkgui import TkGUI, TkWin, MenuItem, TreeWidget, nop, Timeout, callThreadSafe, thunkifySync, delay, runAsync, rescueWidgetOption
-
+from tkgui.ui import TkGUI, TkWin, nop, Timeout, callThreadSafe, thunkifySync, delay, runAsync, rescueWidgetOption, bindYScrollBar, bindXScrollBar
+from tkgui.widgets import MenuItem, TreeWidget
+import tkgui.widgets as _
 
 app = ArgumentParser(prog="hachi-groups", description="GUI tool for recording lyric sentences with hachi")
 app.add_argument("music", type=FileType("r"), nargs="*", help="music BGM to play")
@@ -27,8 +28,8 @@ rescueWidgetOption["relief"] = lambda _: None
 class GUI(TkGUI):
   def __init__(self):
     super().__init__()
-    _ = self.underscore
-    self.a=_.var(str, "some"); self.b=_.var(bool); self.c=_.var(int)
+    z = self.shorthand
+    self.a=z.var(str, "some"); self.b=z.var(bool); self.c=z.var(int)
     c.getAttr(self, "a"); c.getAttr(self, "b"); c.getAttr(self, "c")
   def up(self):
     self.a.set("wtf")
@@ -38,43 +39,43 @@ class GUI(TkGUI):
   def pr(self):
     print(self.c.get())
     self.ui.removeChild(self.ui.childs[5])
+  def addChild(self): self.ui.appendChild(_.text("hhh"))
   def layout(self):
-    _ = self.underscore
-    def addChild(): self.ui.appendChild(_.text("hhh"))
+    z = self.shorthand
     return _.verticalLayout(
       _.button("Yes", self.quit),
       _.text(self.a),
       _.button("Change", self.up),
-      _.horizontalLayout(_.text("ex"), _.text("wtf"), _.button("emmm",addChild), _.text("aa")),
+      _.horizontalLayout(_.text("ex"), _.text("wtf"), _.button("emmm",self.addChild), _.text("aa")),
       _.input("hel"),
       _.separator(),
-      _.withScroll(_.vert, _.by("ta", _.textarea("wtf"))),
-      _.by("ah", _.text("ah")),
+      _.withScroll(z.vert, z.by("ta", _.textarea("wtf"))),
+      z.by("ah", _.text("ah")),
       _.checkBox("Some", self.b),
       _.horizontalLayout(_.radioButton("Wtf", self.c, 1, self.pr), _.radioButton("emm", self.c, 2, self.pr)),
       _.horizontalLayout(
-        _.by("sbar", _.scrollBar(_.vert)),
+        z.by("sbar", _.scrollBar(z.vert)),
         _.verticalLayout(
-          _.by("lbox", _.listBox(("1 2 3  apple juicy lamb clamp banana  "*20).split("  "), _.chooseMulti)),
-          _.by("hsbar", _.scrollBar(_.hor))
+          z.by("lbox", _.listBox(("1 2 3  apple juicy lamb clamp banana  "*20).split("  "), z.chooseMulti)),
+          z.by("hsbar", _.scrollBar(z.hor))
         )
       ),
-      _.withScroll(_.both, _.by("box", _.listBox(("1 2 3  apple juicy lamb clamp banana  "*20).split("  ")))),
+      _.withScroll(z.both, z.by("box", _.listBox(("1 2 3  apple juicy lamb clamp banana  "*20).split("  ")))),
       _.comboBox(self.a, "hello cruel world".split(" ")),
       _.spinBox(range(0, 100+1, 10)),
-      _.slider(range(0, 100+1, 2), orient=_.hor),
+      _.slider(range(0, 100+1, 2), orient=z.hor),
       _.button("hello", self.run1),
       _.button("split", self.run2),
-      _.menuButton("kind", _.menu(MenuItem.CheckBox("wtf", self.b), MenuItem.RadioButton("emm", self.c, 9)), relief=_.raised),
+      _.menuButton("kind", _.menu(MenuItem.CheckBox("wtf", self.b), MenuItem.RadioButton("emm", self.c, 9)), relief=z.raised),
       _.labeledBox("emmm", _.button("Dangerous", self.run3))
     )
   def run1(self): GUI.Layout1().run("Hello", compile_binding={"GUI":GUI})
   def run2(self): GUI.SplitWin().run("Split", compile_binding={})
   def run3(self): print(self.ta.marker["insert"])
   def setup(self):
-    _ = self.underscore
-    _.bindYScrollBar(self.lbox, self.sbar)
-    _.bindXScrollBar(self.lbox, self.hsbar)
+    z = self.shorthand
+    bindYScrollBar(self.lbox, self.sbar)
+    bindXScrollBar(self.lbox, self.hsbar)
     themes = self.listThemes()
     themez = iter(themes)
     self.ah["text"] = ",".join(themes)
@@ -83,13 +84,13 @@ class GUI(TkGUI):
       try: self.theme = next(themez)
       except StopIteration:
         themez = iter(themes)
-    self.ah.bind(_.Events.click, nextTheme)
-    self.ah.bind(_.Events.mouseR, _.makeMenuPopup(_.menu(*[MenuItem.named(it, nop) for it in "Cut Copy Paste Reload".split(" ")], MenuItem.sep, MenuItem.named("Rename", nop))))
+    self.ah.bind(z.Events.click, nextTheme)
+    self.ah.bind(z.Events.mouseR, z.makeMenuPopup(_.menu(*[MenuItem.named(it, nop) for it in "Cut Copy Paste Reload".split(" ")], MenuItem.sep, MenuItem.named("Rename", nop))))
     self.initLooper()
 
   class Layout1(TkWin):
     def layout(self):
-      menubar = self.menu(self.tk,
+      menubar = _.menu(self.tk,
         MenuItem.named("New", nop),
         MenuItem.named("Open", GUI.Layout1.run1),
         MenuItem.SubMenu("Help", [MenuItem.named("Index...", nop), MenuItem.sep, MenuItem.named("About", nop)])
@@ -97,10 +98,10 @@ class GUI(TkGUI):
         # possible: win.tk uses attribute assign(when getCode() ) bound to created menu and it's reused
       self.setMenu(menubar)
       self.setSizeBounds((200,100))
-      _ = self.underscore
+      z = self.shorthand
       return _.verticalLayout(
         _.text("Hello world"),
-        _.by("can", _.canvas((250, 300)))
+        z.by("can", _.canvas((250, 300)))
       )
     @staticmethod
     def run1(): GUI.DoNothing().run("x", compile_binding={})
@@ -111,10 +112,10 @@ class GUI(TkGUI):
       self.can.create_arc(coord, start=0, extent=150, fill="red")
   class SplitWin(TkWin):
     def layout(self):
-      _ = self.underscore
-      return _.withFill(_.splitter(_.hor,
+      z = self.shorthand
+      return _.withFill(_.splitter(z.hor,
         _.text("left pane"),
-        _.splitter(_.vert,
+        _.splitter(z.vert,
           _.text("top pane"),
           _.text("bottom pane")
         )
@@ -125,12 +126,12 @@ class GUI(TkGUI):
       self.nodes = dict()
       self.ftv:TreeWidget
     def layout(self):
-      _ = self.underscore
+      z = self.shorthand
       return _.withFill(_.tabWidget(
         ("Tab 1", _.text("a")),
         ("Tab 2", _.verticalLayout(_.text("Lets dive into the world of computers"))),
-        ("TabTree", _.by("tv", _.treeWidget())),
-        ("File Man", _.by("ftv", _.treeWidget()))
+        ("TabTree", z.by("tv", _.treeWidget())),
+        ("File Man", z.by("ftv", _.treeWidget()))
       ))
     def setup(self):
       self.tv.makeTree(["Name", "Desc"], [
@@ -148,37 +149,36 @@ class GUI(TkGUI):
       ])
       self.tv.item("GATE papers").moveTo("GeeksforGeeks")
       abspath = os.path.abspath(".")
-      #self.ftv.makeTree(["Name"], [(abspath, ["a"])])
-      self.ftv.heading('#0', text='Project tree', anchor='w')
+      self.ftv.makeTree(["Project tree"], [])
       self.insertNode(self.ftv.rootItem, abspath, abspath)
-      self.ftv.bind(TreeWidget.onOpen.name, self.openNode)
-    def insertNode(self, parent, text, abspath):
-      node = parent.addChild(text)
+      self.ftv.on(TreeWidget.open, self.openNode)
+    def insertNode(self, parent:TreeWidget.TreeItem, text, abspath):
+      node = parent.addChild((text,))
       if os.path.isdir(abspath):
-        self.nodes[node] = abspath
-        node.addChild(None)
+        self.nodes[node[0]] = abspath
+        node.addChild((None,))
     def openNode(self, event):
       node = self.ftv.focusItem
-      abspath = self.nodes.pop(node, None)
+      abspath = self.nodes.pop(node[0], None) # This don't work for same-name opens, use multi-map (key-values) or multi column can fix this.
       if abspath:
         print(abspath)
         node.removeChilds()
         for p in os.listdir(abspath):
           self.insertNode(node, p, os.path.join(abspath, p))
-      else: startFile(node.id)
+      else: startFile(node[0])
   class ThreadDemo(TkWin):
     def __init__(self):
       super().__init__()
       self.ta = None
-      _ = self.underscore
-      self.active = _.var(str)
-      self.confirmed = _.var(str)
+      z = self.shorthand
+      self.active = z.var(str)
+      self.confirmed = z.var(str)
     def layout(self):
-      _ = self.underscore
+      z = self.shorthand
       return _.verticalLayout(
-        _.by("ta", _.textarea()),
-        _.createLayout(_.hor, 0, _.text("Total active cases: ~"), _.text(self.active)),
-        _.createLayout(_.vert, 0, _.text("Total confirmed cases:"), _.text(self.confirmed)),
+        z.by("ta", _.textarea()),
+        _.createLayout(z.hor, 0, _.text("Total active cases: ~"), _.text(self.active)),
+        _.createLayout(z.vert, 0, _.text("Total confirmed cases:"), _.text(self.confirmed)),
         _.button("Refresh", self.on_refresh)
       )
     url = "https://api.covid19india.org/data.json"
@@ -205,7 +205,7 @@ class GUI(TkGUI):
       addText('done')
 
 from sys import argv
-from tkgui.tkgui_utils import Codegen
+from tkgui.utils import Codegen
 def main(args = argv[1:]):
   cfg = app.parse_args(args)
   gui = GUI()
