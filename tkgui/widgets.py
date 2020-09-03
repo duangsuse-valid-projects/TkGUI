@@ -1,4 +1,5 @@
 from typing import NamedTuple, Optional
+import abc
 
 from tkinter import Frame, PanedWindow, Label, Button, Entry, Text, StringVar
 from tkinter import Radiobutton, Checkbutton, Listbox, Scrollbar, Scale, Spinbox
@@ -10,10 +11,91 @@ from tkinter import SINGLE, MULTIPLE, BROWSE, EXTENDED, INSERT, END, DISABLED
 from tkinter.ttk import Separator, Progressbar, Combobox, Notebook, Treeview
 
 from .ui import TkGUI, MenuItem, EventName, widget, kwargsNotNull, mayGive1, nop,  bindXScrollBar, bindYScrollBar
-from .utils import guiBackend, Backend
+from .utils import Backend
 from .utils import guiCodegen as c
 
-if guiBackend == Backend.TTk:
+import tkinter.ttk as ttk
+class TickScale(ttk.Frame):
+  '''look function compat for TTk scale'''
+  def __init__(self, master=None, command=None, **kwargs):
+    super().__init__(master)
+    self._showValue = kwargs.pop("showvalue", True)
+    self._step = kwargs.pop("resolution", 0)
+    self.columnconfigure(0, weight=1)
+    def cmd(x): command(x); self.display_value(x) # must. call refresh.
+    self.scale = ttk.Scale(self, command = cmd if command != None else self.display_value, **kwargs)
+    self.scale.grid(row=1, sticky=TkGUI.Anchors.HOR)
+    style = Style(self) # slider length.
+    style_name = kwargs.get("style", "%s.TScale" % str(self.scale["orient"]).capitalize())
+    self._w_slider = style.lookup(style_name, "sliderlength", default=30)
+    self.digits = kwargs.get("tick_format", "%.0f")
+
+    self._start = kwargs["from_"]
+    self._extent = kwargs["to"] - kwargs["from_"]
+    if self._showValue:
+      Label(self, text=" ").grid(row=0)
+      self.label = Label(self, text="0")
+      self.label.place(in_=self.scale, bordermode="outside", x=0, y=0, anchor=TkGUI.Anchors.BOTTOM)
+      self.display_value(self.scale.get())
+
+    self.scale.grid(row=1, sticky=TkGUI.Anchors.HOR)
+    # ticks
+    if self._step != 0:
+      Label(self, text=" ").grid(row=2)
+      n_i = round(self._extent / self._step)
+      self.ticks = [self._start + i*self._step for i in range(0, n_i+1)]
+      self.place_ticks()
+
+    self.scale.bind("<Configure>", self._reconfig)
+
+  def _valPixels(self, value, w_max):
+    percent = ((value - self._start) / self._extent)
+    return percent * (w_max - self._w_slider) + (self._w_slider / 2)
+  @staticmethod
+  def roundInterval(v, step):
+    rnd = round(v)
+    dist = -1 if rnd > step else +1
+    while rnd % step != 0: rnd += dist
+    return rnd
+
+  def display_value(self, value):
+    value = float(value)
+    w_me = self.scale.winfo_width()
+    x = self._valPixels(value, w_me) # position (in pixel) of the center of the slider
+    # pay attention to the borders
+    self.label.place_configure(x=TickScale._bounds(x, w_me, TickScale._wHalf(self.label)))
+    v = TickScale.roundInterval(value, self._step)
+    self.label.configure(text=self.digits %v)
+  @staticmethod
+  def _bounds(n, max, sub):
+    return max-sub if n+sub > max else n
+  @staticmethod
+  def _wHalf(e): return e.winfo_width() / 2
+  def place_ticks(self):
+    def createLabel(i):
+      lbl = Label(self, text=self.digits %self.ticks[i])
+      lbl.place(in_=self.scale, bordermode="outside", x=0, rely=1, anchor="n")
+      return lbl
+    # first tick 
+    tick = self.ticks[0]; label = createLabel(0)
+    w_me = self.scale.winfo_width()
+    sval = lambda: self._valPixels(tick, w_me)
+    w_half = lambda: TickScale._wHalf(label)
+    labelX = lambda x: label.place_configure(x=x)
+    labelX(max(sval(), w_half()) )
+    # ticks in the middle
+    for (i, tick) in enumerate(self.ticks[1:-1]):
+      createLabel(1+i).place_configure(x=sval())
+    # last tick
+    tick = self.ticks[-1]; label = createLabel(len(self.ticks)-1)
+    labelX(TickScale._bounds(sval(), w_me, w_half()) )
+
+  def _reconfig(self, event):
+    """Redisplay the ticks and the label so that they adapt to the new size of the scale."""
+    if self._showValue: self.display_value(self.scale.get())
+    self.place_ticks()
+
+if Backend.TTk.isUsed():
   from tkinter.ttk import * # TTK support
 
 '''
@@ -30,17 +112,21 @@ Aux funs:
 - _.by(name, widget) can dynamic set widget as self.name attribute
 '''
 
-class Widget(TkWidget): #TODO more GUI framework support
-  def __init__(self): pass
+class Widget(TkWidget, metaclass=abc.ABCMeta): #TODO more GUI framework support
+  def __init__(self, parent): pass
   def on(self, event_name:EventName, callback): return super().bind(event_name.name, callback)
   def __getitem__(self, conf): return super().__getitem__(conf)
   def __setitem__(self, conf, value): super().__setitem__(conf, value)
+  @property
+  def width(self): return super().winfo_width()
+  @property
+  def height(self): return super().winfo_height()
   def pack(self, **kwargs): return super().pack_configure(**kwargs)
   def forget(self): return super().forget()
   def destroy(self): return super().destroy()
 class TkWidgetDelegate(Widget):
   def __init__(self, e):
-    super().__init__()
+    super().__init__(None)
     self.e:TkWidget = e
   def pack(self, **kwargs): return self.e.pack(**kwargs)
   def forget(self): return self.e.forget()
@@ -89,8 +175,8 @@ class Textarea(Text, Widget):
 
 MSG_INSERT_EMPTY = "inserting empty [] to: %s"
 class TreeWidget(Treeview, Widget):
-  def __init__(self, master=None, **kw):
-    super().__init__(master=master, **kw)
+  def __init__(self, parent=None, **kw):
+    super().__init__(parent, **kw)
     self._ids = {}
   def _unqid(self, text): # Tk can generate ids, but we shall use indexable ones
     qid = text
@@ -141,14 +227,14 @@ class TreeWidget(Treeview, Widget):
       self._outter.detach(self.id)
     def moveTo(self, dst):
       self._outter.move(self.id, dst, END)
-    def addChild(self, values, is_open=False) -> "TreeItem":
+    def addChild(self, values, is_open=False) -> "TreeWidget.TreeItem":
       if values == None or len(values) == 0: raise ValueError(MSG_INSERT_EMPTY %self.id)
       name = values[0]
       iid = None if name == None else self._outter._unqid(str(name))
       child = self._outter.insert(self.id, END, iid, text=(name or ""), values=values, open=is_open)
       return self.wrap(child)
     @property
-    def parent(self) -> "TreeItem":
+    def parent(self) -> "Optional[TreeWidget.TreeItem]":
       id = self._outter.parent(self.id)
       return self.wrap(id) if id != "" else None
     @property
@@ -208,22 +294,19 @@ class VBox(Box):
   def __init__(self, parent, pad=5):
     super().__init__(parent, pad, True)
 
-class ScrollableFrame(Frame):
+class ScrolledFrame(Frame):
   def __init__(self, parent, orient):
     super().__init__(parent)
     self.oreint = orient
-    self.hbar:Scrollbar=None; self.vbar:Scrollbar=None
-    self.item:TkWidget=None
+    o = self.oreint
+    both = (o == BOTH)
+    self.hbar = Scrollbar(self, orient=HORIZONTAL) if o == HORIZONTAL or both else None
+    self.vbar = Scrollbar(self, orient=VERTICAL) if o == VERTICAL or both else None
+    self.item:Optional[TkWidget] = None
   def pack(self, **kwargs):
     super().pack(**kwargs)
-    both = (self.oreint == BOTH)
-    o = self.oreint
-    if o == HORIZONTAL or both:
-      self.hbar = Scrollbar(self, orient=HORIZONTAL)
-      self.hbar.pack(side=BOTTOM, fill=X)
-    if o == VERTICAL or both:
-      self.vbar = Scrollbar(self, orient=VERTICAL)
-      self.vbar.pack(side=RIGHT, fill=Y)
+    if self.hbar != None: self.hbar.pack(side=BOTTOM, fill=X)
+    if self.vbar != None: self.vbar.pack(side=RIGHT, fill=Y)
     self.item.pack()
     if self.hbar: bindXScrollBar(self.item, self.hbar)
     if self.vbar: bindYScrollBar(self.item, self.vbar)
@@ -237,7 +320,7 @@ class PackSideFill(TkWidgetDelegate):
   def pack(self, *args, **kwargs):
     kwargs.update({"side": self.side or kwargs.get("side"), "fill": self.fill, "expand": self.fill == BOTH})
     self.e.pack(*args, **kwargs)
-  def set(self, *args): return self.e.set(*args)
+  def set(self, *args): return self.e.__getattribute__("set")(*args) #dytype
 
 def _createLayout(ctor_box, p, items):
   box = c.callNew(ctor_box, p)
@@ -300,8 +383,8 @@ def spinBox(p, range:range, **kwargs):
   else: return c.callNew(Spinbox, p, from_=range.start, to=range.stop-1, **kwargs)
 @widget
 def slider(p, range:range, **kwargs):
-  if guiBackend == Backend.Tk: kwargs["resolution"] = range.step
-  return c.callNew(Scale, p, from_=range.start, to=range.stop-1, **kwargs)
+  ctor = TickScale if Backend.TTk.isUsed() else Scale
+  return c.callNew(ctor, p, from_=range.start, to=range.stop-1, resolution=range.step, **kwargs)
 @widget
 def checkBox(p, text_valr, dst, a=True, b=False, on_click=nop):
   '''make [text_valr] and [dst] points to same if you want to change text when checked'''
@@ -326,7 +409,7 @@ def scrollBar(p, orient=VERTICAL):
   return c.named("sbar", sbar)
 @widget
 def progressBar(p, dst, orient=HORIZONTAL):
-  return c.CallNew(Progressbar, p, variable=dst, orient=orient)
+  return c.callNew(Progressbar, p, variable=dst, orient=orient)
 
 @widget
 def separator(p, orient=HORIZONTAL):
@@ -367,6 +450,6 @@ def withFill(p, e_ctor, fill=BOTH, side=None):
 @widget
 def withScroll(p, orient, e_ctor):
   '''must call setup() to bind scroll in setup()'''
-  frame = c.named("scrolld", c.callNew(ScrollableFrame, p, orient))
+  frame = c.named("scrolld", c.callNew(ScrolledFrame, p, orient))
   c.setAttr(frame, "item", mayGive1(frame, e_ctor))
   return frame

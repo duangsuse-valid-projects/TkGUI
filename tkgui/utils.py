@@ -34,6 +34,8 @@ class BackendEnum():
     global guiBackend
     if self.isAvaliable(): guiBackend = self
     else: next(filter(BackendEnum.isAvaliable, Backend.fallbackOrder)).use()
+  def isUsed(self):
+    global guiBackend; return guiBackend == self
 
 class Backend:
   Tk = BackendEnum("tk", "tkinter")
@@ -49,10 +51,10 @@ class EventCallback:
   def __init__(self):
     self._callbacks = []
 
-  class CallbackBreak: pass
+  class CallbackBreak(Exception): pass
   callbackBreak = CallbackBreak()
   @staticmethod
-  def stopChain(): raise callbackBreak
+  def stopChain(): raise EventCallback.callbackBreak
 
   def isIgnoredFrame(self, frame):
     '''Is a stack trace frame ignored by [bind]'''

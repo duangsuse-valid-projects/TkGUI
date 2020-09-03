@@ -1,23 +1,28 @@
-from tkinter import FLAT, RAISED, HORIZONTAL, VERTICAL
-from tkinter import LEFT, TOP, RIGHT, BOTTOM, BOTH
-from tkinter import SINGLE, MULTIPLE, INSERT, END
-
 from tkinter import Menu, PhotoImage
 from tkinter import Tk, Toplevel
 from tkinter import StringVar, BooleanVar, IntVar, DoubleVar
-from tkinter import Widget as TkWidget
+import tkinter.constants as kst
 
 import tkinter.messagebox as tkMsgBox
 import tkinter.filedialog as tkFileMsgBox
-
-from functools import wraps
-
-from .utils import EventCallback, EventPoller, guiBackend, Backend
-from .utils import guiCodegen as c
-
+from tkinter import Widget as TkWidget
 from tkinter.ttk import Style, Sizegrip
 
-from typing import Callable, TypeVar, Any, Optional, Union, Tuple, MutableMapping
+from typing import cast, TypeVar, Callable, Any, Optional, Union, Tuple, MutableMapping
+
+from .utils import EventCallback, EventPoller
+from .utils import guiCodegen as c
+
+from functools import wraps
+def makeThreadSafe(op:Callable):
+  '''
+  A decorator that makes a function safe to be called from any thread, (and it runs in the main thread).
+  If you have a function runs a lot of Tk update and will be called asynchronous, better decorate with this (also it will be faster)
+  [op] should not block the main event loop.
+  '''
+  @wraps(op)
+  def safe(*args, **kwargs): return callThreadSafe(op, args, kwargs).getValue()
+  return safe
 
 T = TypeVar("T"); R = TypeVar("R")
 def mayGive1(value:T, op_obj:Union[Callable[[T], R], R]) -> R:
@@ -36,7 +41,7 @@ def nop(*arg): pass
 rescueWidgetOption:MutableMapping[str, Callable[[str], Tuple[str, Any]]] = {}
 
 from re import search
-from _tkinter import TclError
+from tkinter import TclError
 
 def widget(op):
   '''make a "create" with kwargs configuration = lambda parent: '''
@@ -91,8 +96,9 @@ class BaseTkGUI:
   def __init__(self, root):
     self.tk:Toplevel = root
     self.ui:Optional[TkWidget] = None #>layout
+    self.treeUI:TkWidget
     self.style:Style = Style(self.tk)
-  def layout(self) -> "Widget":
+  def layout(self) -> "widgets.Widget":
     '''
     you can also put static layout configuration (e.g. title/icon/size/sizeBounds) and they are inclueded in codegen.
     (FAILED since Python has NO overriding) I'm sorry about adding so many kwargs, but Python is not real OOP (just obj.op_getter property-based),
@@ -180,19 +186,21 @@ class BaseTkGUI:
   def theme(self, v): return self.style.theme_use(v) #cg:no
   def addSizeGrip(self):
     sg = c.callNew(Sizegrip, self.ui)
-    c.invoke(sg, "pack", side=RIGHT)
+    c.invoke(sg, "pack", side=kst.RIGHT)
 
-  hor = HORIZONTAL
-  vert = VERTICAL
-  both = BOTH
-  left,top,right,bottom = LEFT,TOP,RIGHT,BOTTOM
-  raised,flat=RAISED,FLAT
-  atCursor,atEnd=INSERT,END
-  chooseSingle,chooseMulti = SINGLE,MULTIPLE
+  hor = kst.HORIZONTAL;
+  vert = kst.VERTICAL;
+  both = kst.BOTH;
+  left,top,right,bottom = kst.LEFT,kst.TOP,kst.RIGHT,kst.BOTTOM;
+  raised,flat= kst.RAISED,kst.FLAT;
+  atCursor,atEnd= kst.INSERT,kst.END;
+  chooseSingle,chooseMulti = kst.SINGLE,kst.MULTIPLE;
   class Anchors:
-    LT="NW"; TOP="N"; RT="NE"
-    L="W"; CENTER="CENTER"; R="E"
-    LD="SW"; BOTTOM="S"; RD="SE"
+    LT=kst.NW; TOP=kst.N; RT=kst.NE;
+    L=kst.W; CENTER=kst.CENTER; R=kst.E;
+    LD=kst.SW; BOTTOM=kst.S; RD=kst.SE;
+    HOR=kst.EW; VERT=kst.NS;
+    ALL=kst.NSEW;
 
   class Cursors:
     arrow="arrow"; deny="circle"
@@ -223,14 +231,14 @@ class BaseTkGUI:
     elif kind == "error": tkMsgBox.showerror(msg, tie)
     else: raise ValueError("unknown kind: "+kind)
 
-  def ask(self, msg, title="Question") -> bool: return tkMsgBox.askquestion(title, msg)
+  def ask(self, msg, title="Question") -> str: return tkMsgBox.askquestion(title, msg)
   def askCancel(self, msg, title="Proceed?") -> bool: return not tkMsgBox.askokcancel(title, msg)
   def askOrNull(self, msg, title="Question") -> Optional[bool]: return tkMsgBox.askyesnocancel(title, msg)
 
-  def askOpen(self, file_types, title=None, initial_dir=None, mode=SINGLE) -> str:
+  def askOpen(self, file_types, title=None, initial_dir=None, mode=kst.SINGLE) -> str:
     '''ask path(s) to open, with file types and (optional)title, init dir'''
     kws = kwargsNotNull(filetypes=file_types, title=title, initialdir=initial_dir)
-    return tkFileMsgBox.askopenfilename(**kws) if mode == SINGLE else tkFileMsgBox.askopenfilenames(**kws)
+    return tkFileMsgBox.askopenfilename(**kws) if mode == kst.SINGLE else tkFileMsgBox.askopenfilenames(**kws)
   def askSave(self, default_extension, file_types, title=None, initial=None, initial_dir=None) -> str:
     '''ask path (initial) to save to, with choosed file type'''
     kws = kwargsNotNull(title=title, initialfile=initial, initialdir=initial_dir)
@@ -264,7 +272,8 @@ class TkGUI(BaseTkGUI, EventPoller):
     TkGUI.root = self
     c.named("tkgui", self, is_extern=True)
     c.named("root", self.tk, is_extern=True)
-    self.tk.bind("<Destroy>", lambda _: self.on_quit.run())
+    def onQuit(ev): self.on_quit.run()
+    self.tk.bind("<Destroy>", onQuit)
   def quit(self):
     self.tk.destroy()
 
@@ -277,16 +286,6 @@ class TkWin(BaseTkGUI):
 def callThreadSafe(op, args=(), kwargs={}):
   return TkGUI.root.callThreadSafe(op, args, kwargs)
 
-def makeThreadSafe(op):
-  '''
-  A decorator that makes a function safe to be called from any thread, (and it runs in the main thread).
-  If you have a function runs a lot of Tk update and will be called asynchronous, better decorate with this (also it will be faster)
-  [op] should not block the main event loop.
-  '''
-  @wraps(op)
-  def safe(*args, **kwargs):
-    return callThreadSafe(op, args, kwargs).getValue()
-  return safe
 
 class Timeout:
   def __init__(self, after_what, op):

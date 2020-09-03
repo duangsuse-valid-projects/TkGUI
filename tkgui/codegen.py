@@ -12,14 +12,11 @@ class SyntaxFmt: #singleton
     return ", ".join(sb)
   @staticmethod
   def pyOpRef(op):
-    def hasSelf():
-      try: id(op.__self__); return True
-      except AttributeError: return False
     def joinLast(rsep, sep, xs):
       part = sep.join(xs[:-1])
       return xs[0] if len(xs) < 2 else part+rsep+xs[-1]
     valid = op.__qualname__.replace(".", "").isidentifier()
-    return joinLast(".", "_" if hasSelf() else ".", op.__qualname__.split(".")) if valid else None #e.g. lambda, check not serious
+    return joinLast(".", "_" if hasattr(op, "__self__") else ".", op.__qualname__.split(".")) if valid else None #e.g. lambda, check not serious
   argList = pyArg
   value = repr
   list = lambda xs: "[%s]" %", ".join(xs)
@@ -64,9 +61,9 @@ class Codegen:
   def _initConstNames():
     (t,f,nil) = fmt.tfNil
     return id_dict({True: t, False:f, None: nil})
-  def clear(self, keep_state=False):
+  def clear(self, drop_state=True):
     self._sb.clear()
-    if keep_state: return
+    if not drop_state: return
     self._names.clear(); self._exprs.clear()
     self._autoNamed.clear()
     self._externNames = Codegen._initConstNames()
