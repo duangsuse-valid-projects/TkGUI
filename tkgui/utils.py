@@ -3,7 +3,7 @@ import queue
 import traceback
 from sys import stderr
 
-from tkinter import Tk, Toplevel
+from tkinter import Tk, Toplevel, PhotoImage
 from .codegen import Codegen
 guiCodegen = Codegen()
 
@@ -16,6 +16,25 @@ def startFile(path:str):
   elif name == "Windows":
     __import__("os").startfile(path)
   else: run("xdg-open") # POSIX
+
+import os.path
+def _getAssestDir():
+  return os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "assets"))
+
+def _openIcon(name):
+  return PhotoImage(name, {"file": os.path.join(_getAssestDir(), name)})
+
+def thunkify(op, kw_callback="callback", *args, **kwargs):
+  '''make a function with named callback param as thunk'''
+  def addCb(cb, kws):
+    kws[kw_callback] = cb
+    return kws
+  return lambda cb: op(*args, **addCb(kwargs, cb))
+
+def thunkifySync(op, *args, **kwargs):
+  def callAsync(cb):
+    threading.Thread(target=lambda args1, kwargs1: cb(op(*args1, **kwargs1)), args=(args, kwargs) ).start()
+  return callAsync
 
 MSG_CALL_FROM_THR_MAIN = "call from main thread."
 MSG_CALLED_TWICE = "called twice"
@@ -40,11 +59,42 @@ class BackendEnum():
 class Backend:
   Tk = BackendEnum("tk", "tkinter")
   TTk = BackendEnum("ttk", "tkinter.ttk")
+  ThemedTk = BackendEnum("themedtk", "ttkthemes")
   Wx = BackendEnum("wx", "wx")
   GTK = BackendEnum("gtk", "gi")
-  fallbackOrder = [GTK, Wx, TTk, Tk]
+  fallbackOrder = [GTK, Wx, ThemedTk, TTk, Tk]
 guiBackend = Backend.TTk
 
+class irange:
+  '''inclusive (float) range (first, last)+step, (start/stop fields) compatible with range
+  when used as irange(n), first defaults to 1, and last is inclusive!
+  '''
+  def __init__(self, first, last=None, step=1):
+    if step == 0: raise ValueError("step == 0")
+    self.first = first if last != None else 1; self.last = last if last != None else first; self.step = step
+    self.start = self.first; self.stop = self.last+(1 if self.step > 0 else -1)
+  def __repr__(self):
+    rep = "irange(%s, %s" %(self.first, self.last)
+    if self.step != 1: rep += ", %s" %self.step
+    return rep+")"
+  __str__ = __repr__
+  def __eq__(self, other): return self.first == other.first and self.last == other.last and self.step == other.step
+  def __iter__(self):
+    if isinstance(self.first, int) and isinstance(self.last, int) and isinstance(self.step, int):
+      return iter(range(self.start, self.stop, self.step))
+    return irange._iterator(self)
+  def __reversed__(self):
+    return irange(self.last, self.first, -self.step)
+  class _iterator:
+    def __init__(self, rng:"irange"):
+      self._rng = rng
+      self._i = rng.first
+    def __next__(self):
+      i = self._i; print(i)
+      stop = (i > self._rng.last) if (self._rng.step > 0) else (i < self._rng.last) # count down
+      if stop: raise StopIteration()
+      self._i = i + self._rng.step
+      return i
 
 class EventCallback:
   """An object that calls functions. Use [bind] / [__add__] or [run]"""

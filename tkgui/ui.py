@@ -9,6 +9,8 @@ from tkinter import Widget as TkWidget
 from tkinter.ttk import Style, Sizegrip
 
 from typing import cast, TypeVar, Callable, Any, Optional, Union, Tuple, MutableMapping
+import threading
+import time # for async:delay
 
 from .utils import EventCallback, EventPoller
 from .utils import guiCodegen as c
@@ -40,7 +42,7 @@ def nop(*arg): pass
 
 rescueWidgetOption:MutableMapping[str, Callable[[str], Tuple[str, Any]]] = {}
 
-from re import search
+import re
 from tkinter import TclError
 
 def widget(op):
@@ -50,7 +52,7 @@ def widget(op):
     def createWidget(p): #< cg: NO modify
       try: return op(p, *args, **kwargs1)
       except TclError as e:
-        mch = search("""unknown option "-([^"]+)"$""", str(e))
+        mch = re.search("""unknown option "-([^"]+)"$""", str(e))
         if mch != None:
           opt = mch.groups()[0]
           rescue = rescueWidgetOption.get(opt)
@@ -286,6 +288,13 @@ class TkWin(BaseTkGUI):
 def callThreadSafe(op, args=(), kwargs={}):
   return TkGUI.root.callThreadSafe(op, args, kwargs)
 
+def runAsync(thunk, op, **kwargs):
+  '''launch the [thunk], then call [op] safely with args, return thunk() result'''
+  future = lambda res: callThreadSafe(op, (res,), kwargs)
+  return thunk(future)
+
+def delay(msec):
+  return lambda cb: threading.Thread(target=lambda cb1: cb1(time.sleep(msec/1000)), args=(cb,)).start()
 
 class Timeout:
   def __init__(self, after_what, op):
@@ -296,26 +305,3 @@ class Timeout:
   def cancel(self):
     """Prevent this timeout from running as scheduled."""
     TkGUI.root.tk.after_cancel(self._id) # race condition?
-
-
-def runAsync(thunk, op, **kwargs):
-  '''launch the [thunk], then call [op] safely with args, return thunk() result'''
-  future = lambda res: callThreadSafe(op, (res,), kwargs)
-  return thunk(future)
-
-def thunkify(op, kw_callback="callback", *args, **kwargs):
-  '''make a function with named callback param as thunk'''
-  def addCb(cb, kws):
-    kws[kw_callback] = cb
-    return kws
-  return lambda cb: op(*args, **addCb(kwargs, cb))
-
-from threading import Thread
-def thunkifySync(op, *args, **kwargs):
-  def callAsync(cb):
-    Thread(target=lambda args1, kwargs1: cb(op(*args1, **kwargs1)), args=(args, kwargs) ).start()
-  return callAsync
-
-from time import sleep
-def delay(msec):
-  return lambda cb: Thread(target=lambda cb1: cb1(sleep(msec/1000)), args=(cb,)).start()

@@ -1,44 +1,75 @@
-from typing import NamedTuple, Optional
-import abc
+from typing import Optional, NamedTuple, List
 
-from tkinter import Frame, PanedWindow, Label, Button, Entry, Text, StringVar
+from tkinter import Frame, PanedWindow, Label, Button, Entry, Text, StringVar, BooleanVar
 from tkinter import Radiobutton, Checkbutton, Listbox, Scrollbar, Scale, Spinbox
 from tkinter import LabelFrame, Menubutton, Menu, Canvas
 from tkinter import Widget as TkWidget
 from tkinter import FLAT, RAISED, HORIZONTAL, VERTICAL
 from tkinter import LEFT, TOP, RIGHT, BOTTOM, X, Y, BOTH
-from tkinter import SINGLE, MULTIPLE, BROWSE, EXTENDED, INSERT, END, DISABLED
+from tkinter import SINGLE, MULTIPLE, BROWSE, EXTENDED, INSERT, END, DISABLED, SUNKEN
 from tkinter.ttk import Separator, Progressbar, Combobox, Notebook, Treeview
 
 from .ui import TkGUI, MenuItem, EventName, widget, kwargsNotNull, mayGive1, nop,  bindXScrollBar, bindYScrollBar
-from .utils import Backend
+from .utils import Backend, _openIcon
 from .utils import guiCodegen as c
 
 import tkinter.ttk as ttk
-class TickScale(ttk.Frame):
+from tkinter import DoubleVar
+class WidgetWrapper:
+  def __init__(self, widget, key_map):
+    self._wid:TkWidget = widget
+    self._keyMap:dict = key_map
+  def keys(self): return self._widget.keys() + self._keyMap.keys()
+  def cget(self, key):
+    name = self._keyMap.get(key)
+    return self.__getattribute__(name) if name != None else self._wid.cget(key)
+  def configure(self, cnf={}, **kw):
+    cnf.update(kw)
+    poped = set()
+    for (key, value) in cnf.items():
+      name = self._keyMap.get(key)
+      if name != None: self.__setattr__(name, value); poped.add(key)
+    for key in poped: del cnf[key]
+    self._wid.configure(cnf)
+    self._reconfig()
+class TickScale(ttk.Frame, WidgetWrapper):
+  # Thanks https://stackoverflow.com/questions/47200625/how-to-make-ttk-scale-behave-more-like-tk-scale
+  # Thanks https://github.com/TkinterEP/ttkwidgets/blob/master/ttkwidgets/tickscale.py
   '''look function compat for TTk scale'''
-  def __init__(self, master=None, command=None, **kwargs):
+  def __init__(self, master=None, variable=None, **kwargs):
     super().__init__(master)
-    self._showValue = kwargs.pop("showvalue", True)
+    var = variable or DoubleVar(self, kwargs["from_"])
     self._step = kwargs.pop("resolution", 0)
-    self.columnconfigure(0, weight=1)
-    def cmd(x): command(x); self.display_value(x) # must. call refresh.
-    self.scale = ttk.Scale(self, command = cmd if command != None else self.display_value, **kwargs)
-    self.scale.grid(row=1, sticky=TkGUI.Anchors.HOR)
-    style = Style(self) # slider length.
-    style_name = kwargs.get("style", "%s.TScale" % str(self.scale["orient"]).capitalize())
-    self._w_slider = style.lookup(style_name, "sliderlength", default=30)
-    self.digits = kwargs.get("tick_format", "%.0f")
-
-    self._start = kwargs["from_"]
+    self._showValue = kwargs.pop("showvalue", True)
+    self._digits = kwargs.pop("tick_format", "%.0f")
+    WidgetWrapper.__init__(self, ttk.Scale(self, variable=var, **kwargs), {"showvalue":"_showValue", "resolution":"_step", "tick_format":"_digits"})
+    self._var = var
+    self._start = var.get()
     self._extent = kwargs["to"] - kwargs["from_"]
-    if self._showValue:
-      Label(self, text=" ").grid(row=0)
-      self.label = Label(self, text="0")
-      self.label.place(in_=self.scale, bordermode="outside", x=0, y=0, anchor=TkGUI.Anchors.BOTTOM)
-      self.display_value(self.scale.get())
+    self.rowconfigure(0, weight=1); self.columnconfigure(0, weight=1)
 
-    self.scale.grid(row=1, sticky=TkGUI.Anchors.HOR)
+    style = Style(self) # slider length.
+    self._styleName = kwargs.get("style", "%s.TScale" % str(self._wid["orient"]).capitalize())
+    self._w_slider = style.lookup(self._styleName, "sliderlength", default=30)
+    self._isVertical = (kwargs.get("orient") == VERTICAL)
+    if self._isVertical:
+      self._wid.grid(row=1, sticky=TkGUI.Anchors.VERT)
+    else: self._wid.grid(row=1, sticky=TkGUI.Anchors.HOR)
+
+    self.label = ttk.Label(self, text="0") if self._showValue else None
+    if self.label != None:
+      ttk.Label(self, text=" ").grid(row=0)
+      self._wid.grid(row=1, sticky=TkGUI.Anchors.HOR)
+      if self._isVertical:
+        self._padx = -self.label.winfo_width()
+        self.label.configure(text=self._digits %(self._start + self._extent))
+        self._padx = max(self.label.winfo_width(), self._padx)
+        self._wid.grid_configure(padx=self._padx)
+        self.label.place(in_=self._wid, bordermode="outside", relx=0, y=0, anchor=TkGUI.Anchors.R)
+      else:
+        self.label.place(in_=self._wid, bordermode="outside", x=0, y=0, anchor=TkGUI.Anchors.BOTTOM)
+    self.display_value(self._wid.get())
+
     # ticks
     if self._step != 0:
       Label(self, text=" ").grid(row=2)
@@ -46,39 +77,49 @@ class TickScale(ttk.Frame):
       self.ticks = [self._start + i*self._step for i in range(0, n_i+1)]
       self.place_ticks()
 
-    self.scale.bind("<Configure>", self._reconfig)
+    self._trace = self._var.trace_add("write", self._increment) # or "trace w" for backward compatibility?
+    self._wid.bind("<Configure>", self._reconfig)
+
 
   def _valPixels(self, value, w_max):
     percent = ((value - self._start) / self._extent)
     return percent * (w_max - self._w_slider) + (self._w_slider / 2)
-  @staticmethod
-  def roundInterval(v, step):
+  def _roundInterval(self, v): # or round(a/b) *b
     rnd = round(v)
-    dist = -1 if rnd > step else +1
-    while rnd % step != 0: rnd += dist
+    dist = -1 if rnd > self._step else +1
+    while rnd % self._step != 0: rnd += dist
     return rnd
+  def _increment(self, *args):
+    '''Move the slider only by increment given by resolution.'''
+    value = self._var.get()
+    self._var.set(self._start + self._roundInterval(value))
+    self.display_value(value)
 
   def display_value(self, value):
+    if not self._showValue: return
     value = float(value)
-    w_me = self.scale.winfo_width()
-    x = self._valPixels(value, w_me) # position (in pixel) of the center of the slider
+    w_me = self._wid.winfo_width()
+    h_me = self._wid.winfo_height()
+    dist = self._valPixels(value, w_me) # position (in pixel) of the center of the slider
+    self.label.configure(text=self._digits %self._roundInterval(value))
     # pay attention to the borders
-    self.label.place_configure(x=TickScale._bounds(x, w_me, TickScale._wHalf(self.label)))
-    v = TickScale.roundInterval(value, self._step)
-    self.label.configure(text=self.digits %v)
+    if self._isVertical:
+      self.label.place_configure(y=dist)
+    else:
+      self.label.place_configure(x=TickScale._bounds(dist, w_me, TickScale._wHalf(self.label)))
   @staticmethod
   def _bounds(n, max, sub):
     return max-sub if n+sub > max else n
   @staticmethod
   def _wHalf(e): return e.winfo_width() / 2
   def place_ticks(self):
-    def createLabel(i):
-      lbl = Label(self, text=self.digits %self.ticks[i])
-      lbl.place(in_=self.scale, bordermode="outside", x=0, rely=1, anchor="n")
+    def createLabel(i): # one shadow another... should be removed
+      lbl = Label(self, text=self._digits %self.ticks[i])
+      lbl.place(in_=self._wid, bordermode="outside", x=0, rely=1, anchor="n")
       return lbl
     # first tick 
     tick = self.ticks[0]; label = createLabel(0)
-    w_me = self.scale.winfo_width()
+    w_me = self._wid.winfo_width()
     sval = lambda: self._valPixels(tick, w_me)
     w_half = lambda: TickScale._wHalf(label)
     labelX = lambda x: label.place_configure(x=x)
@@ -92,7 +133,7 @@ class TickScale(ttk.Frame):
 
   def _reconfig(self, event):
     """Redisplay the ticks and the label so that they adapt to the new size of the scale."""
-    if self._showValue: self.display_value(self.scale.get())
+    if self._showValue: self.display_value(self._wid.get())
     self.place_ticks()
 
 if Backend.TTk.isUsed():
@@ -257,7 +298,7 @@ class TreeWidget(Treeview, Widget):
 class Box(Frame, Widget):
   def __init__(self, parent, pad, is_vertical):
     super().__init__(parent)
-    self.childs = []
+    self.childs:List[Widget] = []
     self.pad,self.is_vertical = pad,is_vertical
   def pack(self, **kwargs):
     super().pack(**kwargs)
@@ -294,7 +335,7 @@ class VBox(Box):
   def __init__(self, parent, pad=5):
     super().__init__(parent, pad, True)
 
-class ScrolledFrame(Frame):
+class ScrollerFrame(Frame):
   def __init__(self, parent, orient):
     super().__init__(parent)
     self.oreint = orient
@@ -322,6 +363,51 @@ class PackSideFill(TkWidgetDelegate):
     self.e.pack(*args, **kwargs)
   def set(self, *args): return self.e.__getattribute__("set")(*args) #dytype
 
+class ToggledFrame(Frame):
+  """
+  A frame that can be toggled to open and close.
+  :ivar interior: :class:`ttk.Frame` in which to put the widgets to be toggled with any geometry manager.
+  """
+  def __init__(self, parent=None, text="", width=20, btn_compound=tk.LEFT, **kwargs):
+      """
+      Create a ToggledFrame.
+      :param master: master widget
+      :type master: widget
+      :param text: text to display next to the toggle arrow
+      :type text: str
+      :param width: width of the closed ToggledFrame (in characters)
+      :type width: int
+      :param compound: "center", "none", "top", "bottom", "right" or "left":
+                        position of the toggle arrow compared to the text
+      :type compound: str
+      :param kwargs: keyword arguments passed on to the :class:`ttk.Frame` initializer
+      """
+      super().__init__(parent, **kwargs)
+      self._open = False
+      self.__checkbutton_var = BooleanVar()
+      self._open_image = _openIcon("open.png")
+      self._closed_image = _openIcon("closed.png")
+      self._checkbutton = Checkbutton(self, style="Toolbutton", command=self.toggle,
+        variable=self.__checkbutton_var, text=text, compound=btn_compound,
+        image=self._closed_image, width=width)
+      self.interior = Frame(self, relief=SUNKEN)
+      self._grid_widgets()
+
+  def _grid_widgets(self): self._checkbutton.grid(row=0, column=0, sticky="we")
+
+  def toggle(self):
+    """Toggle :obj:`ToggledFrame.interior` opened or closed."""
+    opened = self._open
+    self._open = not opened
+    self.__checkbutton_var.set(self._open)
+    if opened:
+      self.interior.grid_forget()
+      self._checkbutton.config(image=self._closed_image)
+    else:
+      self.interior.grid(row=1, column=0, sticky="nswe")
+      self._checkbutton.config(image=self._open_image)
+
+
 def _createLayout(ctor_box, p, items):
   box = c.callNew(ctor_box, p)
   c.named("lh" if isinstance(box, HBox) else "lv", box)
@@ -330,7 +416,7 @@ def _createLayout(ctor_box, p, items):
 def verticalLayout(*items): return lambda p: _createLayout(VBox, p, items)
 def horizontalLayout(*items): return lambda p: _createLayout(HBox, p, items)
 @widget
-def createLayout(p, orient, pad, *items):
+def createLayout(p, orient, pad, items, has_scroll=False):
   box = c.named("box", c.callNew(HBox, p, pad) if orient == HORIZONTAL else c.callNew(VBox, p, pad))
   c.setAttr(box, "childs", list(mayGive1(box, it) for it in items))
   return box
@@ -450,6 +536,6 @@ def withFill(p, e_ctor, fill=BOTH, side=None):
 @widget
 def withScroll(p, orient, e_ctor):
   '''must call setup() to bind scroll in setup()'''
-  frame = c.named("scrolld", c.callNew(ScrolledFrame, p, orient))
+  frame = c.named("scrolld", c.callNew(ScrollerFrame, p, orient))
   c.setAttr(frame, "item", mayGive1(frame, e_ctor))
   return frame

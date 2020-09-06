@@ -6,11 +6,11 @@ from tkinter import Menu
 import threading, time, requests
 import os
 
-from tkgui.utils import startFile, Backend
+from tkgui.utils import startFile, Backend, thunkifySync
 from tkgui.utils import guiCodegen as c
 Backend.TTk.use()
 
-from tkgui.ui import TkGUI, TkWin, nop, Timeout, callThreadSafe, thunkifySync, delay, runAsync, rescueWidgetOption, bindYScrollBar, bindXScrollBar
+from tkgui.ui import TkGUI, TkWin, nop, Timeout, callThreadSafe, delay, runAsync, rescueWidgetOption, bindYScrollBar, bindXScrollBar
 from tkgui.widgets import MenuItem, TreeWidget
 import tkgui.widgets as _
 
@@ -177,8 +177,8 @@ class GUI(TkGUI):
       z = self.shorthand
       return _.verticalLayout(
         z.by("ta", _.textarea()),
-        _.createLayout(z.hor, 0, _.text("Total active cases: ~"), _.text(self.active)),
-        _.createLayout(z.vert, 0, _.text("Total confirmed cases:"), _.text(self.confirmed)),
+        _.createLayout(z.hor, 0, [_.text("Total active cases: ~"), _.text(self.active)]),
+        _.createLayout(z.vert, 0, [_.text("Total confirmed cases:"), _.text(self.confirmed)]),
         _.button("Refresh", self.on_refresh)
       )
     url = "https://api.covid19india.org/data.json"

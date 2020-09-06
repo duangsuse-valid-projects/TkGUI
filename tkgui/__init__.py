@@ -27,6 +27,10 @@ TODO:
 - Adopt Image, ScreenDistance(dimension), Varaible (maybe, but _.by is enough?)
 - Adopt Extras: Links for Textarea, and tooltips for all widgets
 - Make window object like GTK: isDecorated, modal, position
+- Table (kind of Treeview with drag/sort column), ColumnEditor
+- Grid, ToggledFrame, ScrolledFrame
+- Calendar, askFont
 '''
 
 __all__ = ["ui", "widgets", "utils"]
+from .tickscale import TickScale

@@ -85,7 +85,7 @@ class Codegen:
     def __exit__(self, *args): self._outter._isAlwaysRegResult = False
 
   @staticmethod
-  def nextName(name:str):
+  def nextName(name):
     '''a, a1, a2, ...'''
     if name == "": return "_"
     if not name[-1].isnumeric(): return "%s1" %name
@@ -192,6 +192,90 @@ class Codegen:
     refs = self._recvRefs.get(attr)
     if refs != None:
       for ref in refs: self._sb.remove(ref)
+
+import struct
+import json
+import sys
+class TupleSerialize:
+  def __init__(self, type, pack_fmt, destruct_names):
+    '''[convert]: pair of callable (fmt, from, into) bytes called to transform _ position in [pack_fmt], indexConvert[i] (dump,load)'''
+    self.type = type
+    self.memberNames = destruct_names
+    self._reprIndices = []
+    packFmts = list(pack_fmt)
+    for (i, c) in enumerate(packFmts):
+      if c == '^': packFmts[i] = 's'; self._reprIndices.append(i)
+    self.packFmt = "".join(packFmts).replace("s", "%ds")
+    nStr = packFmts.count("s")
+    self._packFmtNSize = nStr*struct.calcsize("I")
+    self._packFmtNF = 'I'*nStr
+    self.indexConvert = [None for _ in range(len(pack_fmt))]
+  def _transform(self, data, op_index, is_load):
+    proc = (self._postprocess if is_load else self._preprocess)
+    for i in self._reprIndices:
+      dat = data[i]; isList = isinstance(dat, list)
+      if isinstance(dat, tuple):
+        dat=list(dat); dat.append("T")
+      elif isList: dat.append("_") # support tuple/list, reduce memory use
+      def load():
+        obj = json.loads(dat)
+        if isinstance(obj, list):
+          xs = obj[:-1]; p = obj[-1]
+          return tuple(xs) if p == "T" else xs
+        return obj
+      data[i] = proc(load() if is_load else json.dumps(dat, ensure_ascii=False, separators=(",",":")), i)
+      if isList: del dat[-1]
+  def _preprocess(self, v, i):
+    op = self.indexConvert[i]
+    if op != None: return op[0](v)
+    if isinstance(v, str): return bytes(v, "utf8")
+    return v
+  def _postprocess(self, v, i):
+    op = self.indexConvert[i]
+    if op != None: return op[1](v)
+    if isinstance(v, bytes): return str(v, "utf8")
+    return v
+  def dumpItems(self, v):
+    data = [self._preprocess(v.__getattribute__(name), i) for (i, name) in enumerate(self.memberNames)]
+    self._transform(data, 2, False)
+    return data
+  def loadItems(self, stm):
+    data = [self._postprocess(v, i) for (i, v) in enumerate(stm)]
+    self._transform(data, 1, True)
+    return data
+
+  def dumps(self, v):
+    isStr = lambda it: isinstance(it, (str, bytes))
+    data = self.dumpItems(v)
+    lens = []; i = 0; i_len = 0
+    while i < len(data):
+      dat = data[i]
+      if isStr(dat):
+        n = len(dat); lens.append(n)
+        #data.insert(i, n); i+=1 #collecting sizes is not good idea, but struct does not support sized types
+        data.insert(i_len, n); i_len+=1
+        i += 1 # skip dat
+      i += 1
+    return struct.pack(self._packFmtNF + self.packFmt %tuple(lens), *data)
+  def loads(self, bytes):
+    n = self._packFmtNSize
+    lens = struct.unpack(self._packFmtNF, bytes[:n])
+    data = struct.unpack(self.packFmt %lens, bytes[n:])
+    return self.type(*self.loadItems(data))
+
+_code = type(compile("1", "<get-type(code)>", "eval"))
+_codeMembers = "argcount kwonlyargcount nlocals stacksize flags code consts names varnames filename name firstlineno lnotab freevars cellvars".split(" ")
+_codeMembersPY2 = list(_codeMembers); _codeMembersPY2.remove("kwonlyargcount")
+_isPY3 = (sys.version_info.major == 3)
+
+codeSer = TupleSerialize(_code, "i%siiis^ssssisss" %("i" if _isPY3 else ""), ["co_%s" %it for it in (_codeMembers if _isPY3 else _codeMembersPY2)])
+def _initCodeSer(dist, sep=",", enc="utf8"):
+  itself = (lambda x: x, lambda x: x)
+  nameList = (lambda v: bytes(sep.join(v), enc), lambda v: tuple(str(v, enc).split(sep)) if len(v) != 0 else tuple())
+  codeSer.indexConvert[dist+5] = itself
+  codeSer.indexConvert[dist+12] = itself
+  for i in map(lambda i: dist+i, [7,8,13,14]): codeSer.indexConvert[i] = nameList
+_initCodeSer(0 if _isPY3 else -1)
 
 # boilerplates
 class id_dict(dict):
